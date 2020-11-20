@@ -49,7 +49,7 @@ def extract_dataset_split(images_meta: pd.DataFrame) -> pd.DataFrame:
 
 
 def main():
-    data_root = Path("/Users/raufkurbanov/Data/Aleksi")
+    data_root = Path("//home/rauf/Data/tubules/Aleksi")
     images_meta = extract_meta(data_root=data_root,
                                desc_path=data_root / "Aleksi.csv")
     dataset_meta = extract_dataset_split(images_meta)
