@@ -11,7 +11,6 @@ def parse_path_name(some_path: Path) -> dict:
     return {"plate": plate, "well": well, "sample": n_sample, "channel": channel}
 
 
-# def extract_meta(data_root: Path, desc_path: Path, save_path: Path):
 def extract_meta(data_root: Path, desc_path: Path) -> pd.DataFrame:
     img_paths = data_root.glob("**/*.tif")
     img_paths = list(img_paths)
@@ -30,7 +29,6 @@ def extract_meta(data_root: Path, desc_path: Path) -> pd.DataFrame:
     sorted_merged_meta = merged_meta.sort_values(["plate", "well", "sample"])
 
     return sorted_merged_meta
-    # sorted_merged_meta.to_csv(save_path, index=None)
 
 
 def extract_dataset_split(images_meta: pd.DataFrame) -> pd.DataFrame:
@@ -49,7 +47,7 @@ def extract_dataset_split(images_meta: pd.DataFrame) -> pd.DataFrame:
 
 
 def main():
-    data_root = Path("//home/rauf/Data/tubules/Aleksi")
+    data_root = Path("/home/rauf/Data/tubules/Aleksi")
     images_meta = extract_meta(data_root=data_root,
                                desc_path=data_root / "Aleksi.csv")
     dataset_meta = extract_dataset_split(images_meta)
