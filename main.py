@@ -1,107 +1,103 @@
-from torch.utils.data import DataLoader, random_split
-from pathlib import Path
-import math
-from data import TubulesDataset
-from torchvision import transforms
+from typing import Sequence
+
+import hydra
 import pytorch_lightning as pl
-from torchvision.models import resnet18, resnet50
-from torch.nn import functional as F
-import pandas as pd
-from argparse import ArgumentParser
 import torch
-from data import TRAIN_TRANSFORM
-# from callbacks import AccLoggerCallback
+import torchmetrics
+import wandb
+from omegaconf import DictConfig, OmegaConf
+from pretrainedmodels import resnet50
 from pytorch_lightning.loggers import WandbLogger
+from torch import nn
+
+from datamodule import TubulesDataModule
+from utils import plot_confusion_matrix, fig_to_pil
 
 
-class LitClassifier(pl.LightningModule):
-    def __init__(self):
+class TubulesClassifier(pl.LightningModule):
+    def __init__(self, class_names: Sequence[str]):
         super().__init__()
-        # self.save_hyperparameters()
-        self.backbone = resnet50(pretrained=True)
-        self.accuracy = pl.metrics.Accuracy()
+        self.class_names = class_names
+        num_classes = len(class_names)
+
+        # self.save_hyperparameters()  # TODO
+        self.backbone = resnet50(pretrained="imagenet")
+        dim_feats = self.backbone.last_linear.in_features
+        self.backbone.last_linear = nn.Linear(dim_feats, num_classes)
+
+        # TODO UserWarning: Implicit dimension choice for log_softmax has been deprecated. Change the call to include dim=X as an argument.
+        self.log_softmax = nn.LogSoftmax()
+        self.criterion = nn.NLLLoss()
+
+        self.train_accuracy = torchmetrics.Accuracy()
+        self.val_accuracy = torchmetrics.Accuracy()
+
+        self.val_confmat = torchmetrics.ConfusionMatrix(num_classes)
 
     def forward(self, x):
-        # use forward for inference/predictions
-        embedding = self.backbone(x)
-        return embedding
+        y_hat = self.backbone(x)
+        return self.log_softmax(y_hat)
 
     def training_step(self, batch, batch_idx):
         x, y = batch
-        y_hat = self.backbone(x)
-        loss = F.cross_entropy(y_hat, y)
-        self.log('train_loss', loss)
-        self.log('train_acc_step', self.accuracy(y_hat, y))
+        log_probs = self.forward(x)
+        loss = self.criterion(log_probs, y)
+
+        pred = log_probs.argmax(1)
+        self.train_accuracy(pred, y)
+        # TODO try log_dict
+        self.logger.experiment.log({"train/loss_step": loss})
 
         return loss
+
+    def training_epoch_end(self, training_step_outputs):
+        self.logger.experiment.log({"train/acc_epoch": self.train_accuracy.compute()})
 
     def validation_step(self, batch, batch_idx):
         x, y = batch
-        # print("batch", batch)
-        y_hat = self.backbone(x)
-        loss = F.cross_entropy(y_hat, y)
-        self.log('valid_loss', loss)
+        log_probs = self.forward(x)
+
+        pred = log_probs.argmax(1)
+        self.val_accuracy(pred, y)
+        loss = self.criterion(log_probs, y)
+
+        self.val_confmat(pred, y)
+        self.logger.experiment.log({"val/loss_step": loss})
         return loss
 
-    def test_step(self, batch, batch_idx):
-        x, y = batch
-        y_hat = self.backbone(x)
-        loss = F.cross_entropy(y_hat, y)
-        self.log('test_loss', loss)
+    def validation_epoch_end(self, validation_step_outputs):
+        self.logger.experiment.log({"val/acc_epoch": self.val_accuracy.compute()})
+
+        f = plot_confusion_matrix(self.val_confmat.compute().int().cpu().numpy(),
+                                  labels=self.class_names)
+        self.logger.experiment.log({"val/confusion_matrix": [wandb.Image(fig_to_pil(f), caption="Label")]})
 
     def configure_optimizers(self):
         # self.hparams available because we called self.save_hyperparameters()
         return torch.optim.Adam(self.parameters())
 
-    @staticmethod
-    def add_model_specific_args(parent_parser):
-        parser = ArgumentParser(parents=[parent_parser], add_help=False)
-        parser.add_argument('--learning_rate', type=float, default=0.0001)
-        return parser
 
-
-def main():
+@hydra.main(config_name="config")
+def main(cfg: DictConfig):
+    print(OmegaConf.to_yaml(cfg))
     pl.seed_everything(1234)
 
-    parser = ArgumentParser()
-    parser.add_argument('--batch_size', default=64, type=int)
-    parser = pl.Trainer.add_argparse_args(parser)
-    # parser = LitClassifier.add_model_specific_args(parser)
-    args = parser.parse_args()
-
-    data_root = Path("/home/rauf/Data/tubules/Aleksi")
-    meta_path = Path("/home/rauf/Data/tubules/Aleksi/dataset.csv")
-    meta_df = pd.read_csv(meta_path)
-
-    dataset = TubulesDataset(data_root, meta_df,
-                             transform=TRAIN_TRANSFORM)
-    dlen = len(meta_df)
-    val_size = math.floor(dlen * 0.2)
-    train_size = dlen - val_size
-
-    train_data, val_data = random_split(dataset, [train_size, val_size])
-
-    train_loader = DataLoader(train_data, batch_size=args.batch_size,
-                              # num_workers=8,
-                              pin_memory=True
-                              )
-    val_loader = DataLoader(val_data, batch_size=512, num_workers=8,
-                            pin_memory=True)
-    test_loader = val_loader
-
-    model = LitClassifier()
-    # trainer = pl.Trainer(callbacks=[AccLoggerCallback()]).from_argparse_args(args)
-    # trainer = pl.Trainer().from_argparse_args(args, callbacks=[AccLoggerCallback()])
-    trainer = pl.Trainer().from_argparse_args(args, checkpoint_callback=False,
-                                              # check_val_every_n_epoch=100,
-                                              # overfit_batches=1,
-                                              logger=WandbLogger(project="microtubules", entity="rauf-kurbanov")
-                                              )
-    # trainer = pl.Trainer.from_argparse_args(args, overfit_batches=1)
-    trainer.fit(model, train_loader, val_loader)
-
-    result = trainer.test(test_dataloaders=test_loader)
-    print(result)
+    dm = TubulesDataModule(cfg.dataset.data_root, cfg.dataset.meta_path,
+                           cfg.dataset.cmpds,
+                           train_bs=64, test_bs=128, num_workers=16,
+                           val_size=0.2,
+                           balance=False,
+                           )
+    model = TubulesClassifier(dm.class_names)
+    trainer = pl.Trainer(gpus=1,
+                         # limit_train_batches=1,
+                         # limit_val_batches=1,
+                         checkpoint_callback=False,
+                         # auto_scale_batch_size=True,
+                         logger=WandbLogger(project="microtubules",
+                                            entity="rauf-kurbanov",
+                                            tags=["debug"]))
+    trainer.fit(model, datamodule=dm)
 
 
 if __name__ == '__main__':

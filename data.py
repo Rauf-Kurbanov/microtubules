@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Tuple
+from typing import Tuple, Dict
 
 import albumentations as A
 import cv2
@@ -7,30 +7,27 @@ import numpy as np
 import pandas as pd
 from albumentations.pytorch import ToTensorV2
 from torch.utils.data import Dataset
-from functools import lru_cache
+
+MEAN = (0.485, 0.456, 0.406)
+STD = (0.229, 0.224, 0.225)
 
 
 class TubulesDataset(Dataset):
 
-    COMPOUND_DICT = {"DMSO": 0,
-                     "H": 1,
-                     "B": 2,
-                     "D": 3}
-
-    MEAN = (0.00488444, 0.01433417, 0.)
-    STD = (0.01215854, 0.01962708, 1.)
-
-    def __init__(self, data_root: Path, meta_df: pd.DataFrame, transform=None):
+    # TODO typing
+    def __init__(self, data_root: Path, meta_df: pd.DataFrame,
+                 label_dict: Dict[str, int], transform=None):
         super().__init__()
         self.meta = meta_df
         self.data_root = data_root
+        self.label_dict = label_dict
         self.transform = transform
 
-    # @lru_cache(maxsize=None)
     def _read_rgb(self, index: int) -> np.ndarray:
         row = self.meta.iloc[index]
-        channel_a_path = self.data_root / row.channel_A
-        channel_b_path = self.data_root / row.channel_B
+
+        channel_a_path = self.data_root / row.channel_path_x
+        channel_b_path = self.data_root / row.channel_path_y
         array_a = cv2.imread(str(channel_a_path), cv2.IMREAD_UNCHANGED)
         array_b = cv2.imread(str(channel_b_path), cv2.IMREAD_UNCHANGED)
 
@@ -43,9 +40,9 @@ class TubulesDataset(Dataset):
             rgb_array = self.transform(image=rgb_array)["image"]
 
         row = self.meta.iloc[index]
-        label = self.COMPOUND_DICT[row.compound]
+        label = row.treatment_id
 
-        return rgb_array, label
+        return rgb_array, self.label_dict[label]
 
     def __len__(self) -> int:
         return len(self.meta)
@@ -58,17 +55,9 @@ class TubulesDataset(Dataset):
 
 
 TRAIN_TRANSFORM = A.Compose([
-    A.ToFloat(max_value=65535.0),
+    A.ToFloat(max_value=float(2 ** 16 - 1)),
     # A.RandomCrop(height=224, width=224),
     A.RandomResizedCrop(height=224, width=224, scale=(0.1, 0.25)),
-    A.Normalize(mean=TubulesDataset.MEAN, std=TubulesDataset.STD),
+    A.Normalize(mean=MEAN, std=STD),
     ToTensorV2(),
 ])
-
-
-if __name__ == '__main__':
-    data_root = Path("/home/rauf/Data/tubules/Aleksi")
-    meta_path = Path("/home/rauf/Data/tubules/Aleksi/dataset.csv")
-
-    ds = TubulesDataset(data_root, meta_path)
-    print(ds[0])

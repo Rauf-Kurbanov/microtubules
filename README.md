@@ -1,6 +1,6 @@
 # microtubules
 
-In this project we were tasked to classify compound be cellular images.
+In this project we classify applied compound by cellular images.
 For each image we were given two separate channels and compound with the applied dosage.
 ![sample](https://user-images.githubusercontent.com/1387585/109386834-9fa7a800-790e-11eb-8b6c-e8fab277d836.png)
 
