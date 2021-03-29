@@ -1,3 +1,11 @@
+seed: 1234
+train_bs: 256
+test_bs: 256
+num_workers: 16
+val_size: 0.2
+balance_classes: False
+frozen_encoder: True
+
 dataset:
   data_root: /home/rauf/Data/Ola
   meta_path: /home/rauf/Data/Ola/metadata/dataset.csv
@@ -19,3 +27,8 @@ dataset:
     "[e]": [ 3.0 ]
     "[f]": [ 3.0 ]
 
+trainer:
+  gpus: [1]
+  checkpoint_callback: False
+#  limit_train_batches: 1
+#  limit_val_batches: 1

@@ -12,15 +12,15 @@ from torch.utils.data import DataLoader
 
 from data import TubulesDataset, TRAIN_TRANSFORM
 from collections import Counter
+import wandb
 
 
 class TubulesDataModule(pl.LightningDataModule):
 
-    # TODO pathlib.Path
     # TODO Enum for cmpds
     def __init__(self, data_root: str, meta_path: str, cmpds: Dict[str, List[float]],
                  train_bs: int, test_bs: int, val_size: float, num_workers: int,
-                 balance: bool):
+                 balance_classes: bool, logger):
         super().__init__()
 
         self.data_root = Path(data_root)
@@ -30,7 +30,8 @@ class TubulesDataModule(pl.LightningDataModule):
         self.test_bs = test_bs
         self.num_workers = num_workers
         self.val_size = val_size
-        self.balance = balance
+        self.balance = balance_classes
+        self.logger = logger
 
         meta_df = pd.read_csv(self.meta_path)
         filtered_meta_df = meta_df[meta_df.cmpd.isin(self.cmpds)]
@@ -46,21 +47,27 @@ class TubulesDataModule(pl.LightningDataModule):
         Data operations you might want to perform on every GPU.
         Assigning train/val datasets for use in dataloaders
         """
-        # TODO add to self
         label_dict = {s: i for i, s in enumerate(self.class_names)}
-        # TODO log properly, mb histogramm
-        print("Original class balance:", Counter(self.meta.treatment_id))
+
+        cnt = Counter(self.meta.treatment_id)
+        data = [[cname, cnt[cname]] for cname in self.class_names]
+        table = wandb.Table(data=data, columns=["treatment", "frequency"])
+        self.logger.experiment.log({"class_balance":
+                                        wandb.plot.bar(table, "treatment", "frequency",
+                                                       title="Treatment distribution")})
 
         train_meta, val_meta = train_test_split(self.meta, test_size=self.val_size,
                                                 stratify=self.meta.treatment_id)
 
+        print("Train size before balancing", len(train_meta))
         if self.balance:
             # resample all classes but the majority class
             oversample = RandomOverSampler(sampling_strategy="not majority")
             balanced_train_meta, _ = oversample.fit_resample(train_meta, train_meta.treatment_id)
         else:
             balanced_train_meta = train_meta
-        print("Train class balance:", Counter(balanced_train_meta.treatment_id))
+        print("Train size after balancing", len(balanced_train_meta))
+        print("Val size", len(val_meta))
 
         self.train_data = TubulesDataset(self.data_root, balanced_train_meta, label_dict,
                                          transform=TRAIN_TRANSFORM)

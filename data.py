@@ -14,9 +14,8 @@ STD = (0.229, 0.224, 0.225)
 
 class TubulesDataset(Dataset):
 
-    # TODO typing
     def __init__(self, data_root: Path, meta_df: pd.DataFrame,
-                 label_dict: Dict[str, int], transform=None):
+                 label_dict: Dict[str, int], transform: A.Compose = A.NoOp()):
         super().__init__()
         self.meta = meta_df
         self.data_root = data_root

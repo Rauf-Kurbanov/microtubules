@@ -43,7 +43,8 @@ def plot_confusion_matrix(cm, labels):
     ax.yaxis.tick_left()
 
     for i, j in itertools.product(range(cm.shape[0]), range(cm.shape[1])):
-        ax.text(j, i, format(cm[i, j], 'd') if cm[i, j] != 0 else '.', horizontalalignment="center", fontsize=6,
+        ax.text(j, i, format(cm[i, j], 'd') if cm[i, j] != 0 else '.',
+                horizontalalignment="center", fontsize=4,
                 verticalalignment='center', color="black")
     fig.set_tight_layout(True)
     return fig

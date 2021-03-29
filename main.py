@@ -15,36 +15,46 @@ from utils import plot_confusion_matrix, fig_to_pil
 
 
 class TubulesClassifier(pl.LightningModule):
-    def __init__(self, class_names: Sequence[str]):
+    def __init__(self, class_names: Sequence[str], frozen_encoder: bool = True,
+                 log_confmat_every: int = 10):
         super().__init__()
+        self.log_confmat_every = log_confmat_every
         self.class_names = class_names
         num_classes = len(class_names)
 
-        # self.save_hyperparameters()  # TODO
         self.backbone = resnet50(pretrained="imagenet")
         dim_feats = self.backbone.last_linear.in_features
+
+        if frozen_encoder:
+            for param in self.backbone.parameters():
+                param.requires_grad = False
+            self.backbone.eval()
+
         self.backbone.last_linear = nn.Linear(dim_feats, num_classes)
 
-        # TODO UserWarning: Implicit dimension choice for log_softmax has been deprecated. Change the call to include dim=X as an argument.
-        self.log_softmax = nn.LogSoftmax()
+        # TODO move into sequential
+        self.log_softmax = nn.LogSoftmax(dim=1)
         self.criterion = nn.NLLLoss()
 
         self.train_accuracy = torchmetrics.Accuracy()
         self.val_accuracy = torchmetrics.Accuracy()
 
         self.val_confmat = torchmetrics.ConfusionMatrix(num_classes)
+        self.train_confmat = torchmetrics.ConfusionMatrix(num_classes)
 
     def forward(self, x):
         y_hat = self.backbone(x)
-        return self.log_softmax(y_hat)
+        log_probs = self.log_softmax(y_hat)
+        return log_probs
 
     def training_step(self, batch, batch_idx):
         x, y = batch
         log_probs = self.forward(x)
         loss = self.criterion(log_probs, y)
-
         pred = log_probs.argmax(1)
+
         self.train_accuracy(pred, y)
+        self.train_confmat(pred, y)
         # TODO try log_dict
         self.logger.experiment.log({"train/loss_step": loss})
 
@@ -53,14 +63,19 @@ class TubulesClassifier(pl.LightningModule):
     def training_epoch_end(self, training_step_outputs):
         self.logger.experiment.log({"train/acc_epoch": self.train_accuracy.compute()})
 
+        if self.current_epoch % self.log_confmat_every == 0:
+            f = plot_confusion_matrix(self.train_confmat.compute().int().cpu().numpy(),
+                                      labels=self.class_names)
+            self.train_confmat.reset()
+            self.logger.experiment.log({"train/confusion_matrix": [wandb.Image(fig_to_pil(f))]})
+
     def validation_step(self, batch, batch_idx):
         x, y = batch
         log_probs = self.forward(x)
-
-        pred = log_probs.argmax(1)
-        self.val_accuracy(pred, y)
         loss = self.criterion(log_probs, y)
+        pred = log_probs.argmax(1)
 
+        self.val_accuracy(pred, y)
         self.val_confmat(pred, y)
         self.logger.experiment.log({"val/loss_step": loss})
         return loss
@@ -68,9 +83,11 @@ class TubulesClassifier(pl.LightningModule):
     def validation_epoch_end(self, validation_step_outputs):
         self.logger.experiment.log({"val/acc_epoch": self.val_accuracy.compute()})
 
-        f = plot_confusion_matrix(self.val_confmat.compute().int().cpu().numpy(),
-                                  labels=self.class_names)
-        self.logger.experiment.log({"val/confusion_matrix": [wandb.Image(fig_to_pil(f), caption="Label")]})
+        if self.current_epoch % self.log_confmat_every == 0:
+            f = plot_confusion_matrix(self.val_confmat.compute().int().cpu().numpy(),
+                                      labels=self.class_names)
+            self.val_confmat.reset()
+            self.logger.experiment.log({"val/confusion_matrix": [wandb.Image(fig_to_pil(f))]})
 
     def configure_optimizers(self):
         # self.hparams available because we called self.save_hyperparameters()
@@ -80,23 +97,24 @@ class TubulesClassifier(pl.LightningModule):
 @hydra.main(config_name="config")
 def main(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
-    pl.seed_everything(1234)
+    pl.seed_everything(cfg.seed)
+    config_dict = OmegaConf.to_container(cfg, resolve=True)
 
+    logger = WandbLogger(project="microtubules",
+                         entity="rauf-kurbanov",
+                         config=config_dict,
+                         tags=["debug"])
     dm = TubulesDataModule(cfg.dataset.data_root, cfg.dataset.meta_path,
                            cfg.dataset.cmpds,
-                           train_bs=64, test_bs=128, num_workers=16,
-                           val_size=0.2,
-                           balance=False,
+                           train_bs=cfg.train_bs, test_bs=cfg.test_bs,
+                           num_workers=cfg.num_workers,
+                           val_size=cfg.val_size,
+                           balance_classes=cfg.balance_classes,
+                           logger=logger
                            )
-    model = TubulesClassifier(dm.class_names)
-    trainer = pl.Trainer(gpus=1,
-                         # limit_train_batches=1,
-                         # limit_val_batches=1,
-                         checkpoint_callback=False,
-                         # auto_scale_batch_size=True,
-                         logger=WandbLogger(project="microtubules",
-                                            entity="rauf-kurbanov",
-                                            tags=["debug"]))
+    model = TubulesClassifier(dm.class_names, cfg.frozen_encoder)
+    trainer = pl.Trainer(**cfg.trainer,
+                         logger=logger)
     trainer.fit(model, datamodule=dm)
 
 
