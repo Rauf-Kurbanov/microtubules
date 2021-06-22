@@ -1,19 +1,19 @@
 import random
+from collections import Counter
 from pathlib import Path
 from typing import Optional, List, Dict
 
+import albumentations as A
 import numpy as np
 import pandas as pd
 import pytorch_lightning as pl
 import torch
+import wandb
 from imblearn.over_sampling import RandomOverSampler
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader
 
-from data import TubulesDataset
-from collections import Counter
-import wandb
-import albumentations as A
+from data import TubulesDataset, DataItem
 
 
 class TubulesDataModule(pl.LightningDataModule):
@@ -45,6 +45,7 @@ class TubulesDataModule(pl.LightningDataModule):
         self.meta = filtered_meta_df
 
         self.class_names = sorted(self.meta.treatment_id.unique())
+        # self.class_ids = {n: i for i, n in enumerate(self.class_names)}
 
     def prepare_data(self, *args, **kwargs):
         pass
@@ -67,10 +68,13 @@ class TubulesDataModule(pl.LightningDataModule):
         else:
             balanced_train_meta = train_meta
 
-        self._plot_class_balance(balanced_train_meta, tag="after_class_balance", title="Balanced treatment distribution")
+        self._plot_class_balance(balanced_train_meta, tag="after_class_balance",
+                                 title="Balanced treatment distribution")
         self._plot_class_balance(val_meta, tag="val_class_balance", title="Treatment distribution on validation")
 
-        self.train_data = TubulesDataset(self.data_root, balanced_train_meta, label_dict,
+        self.train_data = TubulesDataset(data_root=self.data_root,
+                                         meta_df=balanced_train_meta,
+                                         label_dict=label_dict,
                                          transform=self.transforms)
         # TODO separate augmentations
         self.val_data = TubulesDataset(self.data_root, val_meta, label_dict,
@@ -87,13 +91,15 @@ class TubulesDataModule(pl.LightningDataModule):
                           batch_size=self.train_bs,
                           num_workers=self.num_workers,
                           worker_init_fn=self._dataloader_worker_init,
+                          collate_fn=DataItem.collate,
                           shuffle=True)
 
     def val_dataloader(self):
         return DataLoader(self.val_data,
                           batch_size=self.test_bs,
                           num_workers=self.num_workers,
-                          worker_init_fn=self._dataloader_worker_init)
+                          worker_init_fn=self._dataloader_worker_init,
+                          collate_fn=DataItem.collate)
 
     @staticmethod
     def _dataloader_worker_init(*args, **kwargs):

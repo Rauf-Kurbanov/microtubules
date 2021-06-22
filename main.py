@@ -4,25 +4,28 @@ import hydra
 import pytorch_lightning as pl
 import torch
 import torchmetrics
+# import pretrainedmodels
+import torchvision.models as models
 import wandb
 from omegaconf import DictConfig, OmegaConf
-from pretrainedmodels import resnet50
 # from pytorch_lightning.loggers import WandbLogger
 from torch import nn
 
 from augmentations import AUGS_SELECT
+from data import DataItemBatch
 from datamodule import TubulesDataModule
 from utils import plot_confusion_matrix, fig_to_pil
-# import pretrainedmodels
-import torchvision.models as models
 
 
 class TubulesClassifier(pl.LightningModule):
     def __init__(self, *, backbone_name: str,
                  class_names: Sequence[str], frozen_encoder: bool = True,
-                 log_confmat_every: int = 10):
+                 log_confmat_every: int = 30,
+                 # TODO n_samples into config
+                 log_samples_every: int = 40):
         super().__init__()
         self.log_confmat_every = log_confmat_every
+        self.log_samples_every = log_samples_every
         self.class_names = class_names
         num_classes = len(class_names)
 
@@ -55,23 +58,41 @@ class TubulesClassifier(pl.LightningModule):
         log_probs = self.log_softmax(y_hat)
         return log_probs
 
-    def training_step(self, batch, batch_idx):
-        x, y = batch
-        log_probs = self.forward(x)
-        loss = self.criterion(log_probs, y)
+    def training_step(self, batch: DataItemBatch, batch_idx: int):
+        input_imgs, labels, orig_imgs = batch.input_images, batch.labels, batch.original_images
+
+        log_probs = self.forward(input_imgs)
+        loss = self.criterion(log_probs, labels)
         pred = log_probs.argmax(1)
 
-        self.train_accuracy(pred, y)
-        self.train_confmat(pred, y)
-        # TODO try log_dict
-        # self.logger.experiment.log({"train/loss_step": loss})
+        self.train_accuracy(pred, labels)
+        self.train_confmat(pred, labels)
+
+        if batch_idx % self.log_samples_every == 0:
+            self._plot_samples(batch, pred, tag="train")
         wandb.log({"train/loss_step": loss.item()})
 
         return loss
 
+    def _plot_samples(self, batch: DataItemBatch, pred: torch.Tensor, tag: str, n_samples: int = 5):
+        input_imgs, labels, orig_imgs = batch.input_images, batch.labels, batch.original_images
+        samples = list(zip(orig_imgs, pred, labels))[:n_samples]
+        wandb.log({f"{tag}/samples": [wandb.Image(img,
+                                                  caption=f"pred:{self.class_names[p]}, gt:{self.class_names[l]}")
+                                      for img, p, l in samples]})
+        red_samples = list(zip(input_imgs[:n_samples, 0, :, :].cpu().numpy(), pred, labels))
+        wandb.log({f"{tag}/red_samples": [wandb.Image(img,
+                                                      caption=f"pred:{self.class_names[p]}, gt:{self.class_names[l]}")
+                                          for img, p, l in red_samples]})
+        green_samples = list(zip(input_imgs[:n_samples, 1, :, :].cpu().numpy(), pred, labels))
+        wandb.log({f"{tag}/green_samples": [wandb.Image(img,
+                                                        caption=f"pred:{self.class_names[p]}, gt:{self.class_names[l]}")
+                                            for img, p, l in green_samples]})
+
     def training_epoch_end(self, training_step_outputs):
         # self.logger.experiment.log({"train/acc_epoch": self.train_accuracy.compute()})
         wandb.log({"train/acc_epoch": self.train_accuracy.compute()})
+        self.train_accuracy.reset()
 
         if self.current_epoch % self.log_confmat_every == 0:
             f = plot_confusion_matrix(self.train_confmat.compute().int().cpu().numpy(),
@@ -81,20 +102,24 @@ class TubulesClassifier(pl.LightningModule):
         self.train_confmat.reset()
 
     def validation_step(self, batch, batch_idx):
-        x, y = batch
-        log_probs = self.forward(x)
-        loss = self.criterion(log_probs, y)
+        # TODO
+        input_imgs, labels, orig_imgs = batch.input_images, batch.labels, batch.original_images
+        log_probs = self.forward(input_imgs)
+        loss = self.criterion(log_probs, labels)
         pred = log_probs.argmax(1)
 
-        self.val_accuracy(pred, y)
-        self.val_confmat(pred, y)
+        self.val_accuracy(pred, labels)
+        self.val_confmat(pred, labels)
         # self.logger.experiment.log({"val/loss_step": loss})
+        if batch_idx % self.log_samples_every == 0:
+            self._plot_samples(batch, pred, tag="val")
         wandb.log({"val/loss_step": loss})
         return loss
 
     def validation_epoch_end(self, validation_step_outputs):
         # self.logger.experiment.log({"val/acc_epoch": self.val_accuracy.compute()})
         wandb.log({"val/acc_epoch": self.val_accuracy.compute()})
+        self.val_accuracy.reset()
 
         if self.current_epoch % self.log_confmat_every == 0:
             f = plot_confusion_matrix(self.val_confmat.compute().int().cpu().numpy(),
