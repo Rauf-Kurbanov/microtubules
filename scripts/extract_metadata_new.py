@@ -40,13 +40,21 @@ def extract_meta(data_root: Path, meta_path: Path) -> pd.DataFrame:
     return final_meta
 
 
+def flag_damaged(meta: pd.DataFrame, flagged_df: pd.DataFrame):
+    flagged_samples = meta.channel_path_x.apply(lambda x: x.split("/")[-1]).isin(flagged_df.FileName_HOECHST)
+    masked_meta = meta.assign(damaged=flagged_samples)
+
+    return masked_meta
+
+
 def main():
     data_root = Path("/Users/raufkurbanov/Data/Ola")
     meta_path = Path("/Users/raufkurbanov/Data/Ola/metadata/PVE-plateLayouts.csv")
     save_path = Path("/Users/raufkurbanov/Data/Ola/metadata/dataset.csv")
 
     dataset_meta = extract_meta(data_root, meta_path)
-    dataset_meta.to_csv(save_path, index=None)
+    flagged_dataset_meta = flag_damaged(dataset_meta)
+    flagged_dataset_meta.to_csv(save_path, index=None)
 
 
 if __name__ == '__main__':
