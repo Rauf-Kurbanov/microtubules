@@ -84,8 +84,11 @@ class TubulesDataset(Dataset):
             t_rgb_array = rgb_array
         row = self.meta.iloc[index]
         label = self.label_dict[row.treatment_id]
+        example_img_size = (256, 256)
 
-        return DataItem(t_rgb_array, rgb_array, label)
+        return DataItem(t_rgb_array,
+                        cv2.resize(rgb_array, example_img_size),
+                        label)
 
     def __len__(self) -> int:
         return len(self.meta)
@@ -96,6 +99,5 @@ class TubulesDataset(Dataset):
         rgb_img = np.stack([red_array, green_array, blank_channel], axis=-1)
         rgb_img = rgb_img / 2 ** 14
         np.clip(rgb_img, 0, 1, out=rgb_img)
-        rgb_img = cv2.resize(rgb_img, (256, 256))
 
         return rgb_img

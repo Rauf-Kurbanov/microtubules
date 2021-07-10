@@ -7,9 +7,8 @@ STD = (0.229, 0.224, 1)
 
 def train_no_aug_crop() -> A.Compose:
     train_transform = A.Compose([
-        # A.ToFloat(max_value=float(2 ** 16 - 1)),
-        # A.RandomCrop(height=224, width=224),
-        A.RandomResizedCrop(height=224, width=224, scale=(0.1, 0.25)),
+        A.RandomCrop(height=512, width=512),
+        A.Resize(height=224, width=224),
         A.Normalize(mean=MEAN, std=STD),
         ToTensorV2(),
     ])
@@ -19,7 +18,6 @@ def train_no_aug_crop() -> A.Compose:
 
 def train_no_aug_resize() -> A.Compose:
     train_transform = A.Compose([
-        # A.ToFloat(max_value=float(2 ** 16 - 1)),
         A.Resize(height=224, width=224),
         A.Normalize(mean=MEAN, std=STD),
         ToTensorV2(),
@@ -28,9 +26,20 @@ def train_no_aug_resize() -> A.Compose:
     return train_transform
 
 
+def train_flip() -> A.Compose:
+    train_transform = A.Compose([
+        A.Resize(height=224, width=224),
+        A.Flip(p=0.6),
+        A.Normalize(mean=MEAN, std=STD),
+        ToTensorV2(),
+    ])
+
+    return train_transform
+
 AUGS_SELECT = {
     "no_aug_crop": train_no_aug_crop,
     "no_aug_resize": train_no_aug_resize,
+    "flip": train_flip,
 }
 
 
