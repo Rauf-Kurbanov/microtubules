@@ -1,4 +1,4 @@
-from typing import Sequence, Dict
+from typing import Sequence
 
 import hydra
 import pytorch_lightning as pl
@@ -9,18 +9,24 @@ import torchvision.models as models
 import wandb
 from omegaconf import DictConfig, OmegaConf
 from torch import nn
+from torch.nn import MultiMarginLoss
 
 from augmentations import AUGS_SELECT
 from data import DataItemBatch
 from datamodule import TubulesDataModule
 from utils import plot_confusion_matrix, fig_to_pil
 
-BACKBONES: Dict[str, nn.Module] = {"resnet18": models.resnet18,
-                                   "resnet152": models.resnet152()}
+
+BACKBONES = {"resnet18": models.resnet18,
+             "resnet152": models.resnet152}
+
+CRITERIA = {"CE": nn.NLLLoss(),
+            "hinge": MultiMarginLoss()}
 
 
 class TubulesClassifier(pl.LightningModule):
     def __init__(self, *, backbone_name: str,
+                 criterion_name: str,
                  class_names: Sequence[str], frozen_encoder: bool = True,
                  log_confmat_every: int = 30,
                  # TODO n_samples into config
@@ -29,10 +35,11 @@ class TubulesClassifier(pl.LightningModule):
         self.log_confmat_every = log_confmat_every
         self.log_samples_every = log_samples_every
         self.class_names = class_names
+        self.criterion = CRITERIA[criterion_name]
         num_classes = len(class_names)
 
         # self.backbone = pretrainedmodels.__dict__[backbone_name](pretrained="imagenet")
-        self.backbne = BACKBONES[backbone_name](pretrained=True)
+        self.backbone = BACKBONES[backbone_name](pretrained="imagenet")
 
         # dim_feats = self.backbone.last_linear.in_features
         dim_feats = self.backbone.fc.in_features
@@ -45,10 +52,7 @@ class TubulesClassifier(pl.LightningModule):
         # self.backbone.last_linear = nn.Linear(dim_feats, num_classes)
         self.backbone.fc = nn.Linear(dim_feats, num_classes)
 
-        # TODO move into sequential
         self.log_softmax = nn.LogSoftmax(dim=1)
-        self.criterion = nn.NLLLoss()
-
         self.train_accuracy = torchmetrics.Accuracy()
         self.val_accuracy = torchmetrics.Accuracy()
 
@@ -102,7 +106,6 @@ class TubulesClassifier(pl.LightningModule):
         self.train_confmat.reset()
 
     def validation_step(self, batch, batch_idx):
-        # TODO
         input_imgs, labels, orig_imgs = batch.input_images, batch.labels, batch.original_images
         log_probs = self.forward(input_imgs)
         loss = self.criterion(log_probs, labels)
@@ -148,10 +151,9 @@ def main(cfg: DictConfig):
                            num_workers=cfg.num_workers,
                            val_size=cfg.val_size,
                            balance_classes=cfg.balance_classes,
-                           transforms=transforms,
-                           # logger=logger
-                           )
+                           transforms=transforms)
     model = TubulesClassifier(backbone_name=cfg.backbone_name,
+                              criterion_name=cfg.criterion,
                               class_names=dm.class_names,
                               frozen_encoder=cfg.frozen_encoder)
     trainer = pl.Trainer(**cfg.trainer)

@@ -1,12 +1,13 @@
 seed: 1234
-train_bs: 256
-test_bs: 256
-num_workers: 5
+train_bs: 512
+test_bs: 512
+num_workers: 0
 val_size: 0.2
 balance_classes: True
-frozen_encoder: False
-backbone_name: resnet101
-augmentations: no_aug_crop
+frozen_encoder: True
+backbone_name: resnet152
+augmentations: flip
+criterion: hinge
 
 dataset:
   data_root: /home/rauf/Data/Ola
@@ -46,7 +47,7 @@ dataset:
     "[f]": [ 3.0 ]
 
 trainer:
-  gpus: [1]
+  gpus: [2]
 #  accelerator: dp
   checkpoint_callback: False
 #  limit_train_batches: 3
