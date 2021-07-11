@@ -1,4 +1,4 @@
-from typing import Sequence
+from typing import Sequence, Dict
 
 import hydra
 import pytorch_lightning as pl
@@ -8,13 +8,15 @@ import torchmetrics
 import torchvision.models as models
 import wandb
 from omegaconf import DictConfig, OmegaConf
-# from pytorch_lightning.loggers import WandbLogger
 from torch import nn
 
 from augmentations import AUGS_SELECT
 from data import DataItemBatch
 from datamodule import TubulesDataModule
 from utils import plot_confusion_matrix, fig_to_pil
+
+BACKBONES: Dict[str, nn.Module] = {"resnet18": models.resnet18,
+                                   "resnet152": models.resnet152()}
 
 
 class TubulesClassifier(pl.LightningModule):
@@ -30,8 +32,8 @@ class TubulesClassifier(pl.LightningModule):
         num_classes = len(class_names)
 
         # self.backbone = pretrainedmodels.__dict__[backbone_name](pretrained="imagenet")
-        self.backbone = models.resnet152(pretrained=True)
-        # self.backbone = resnet50(pretrained="imagenet")
+        self.backbne = BACKBONES[backbone_name](pretrained=True)
+
         # dim_feats = self.backbone.last_linear.in_features
         dim_feats = self.backbone.fc.in_features
 
@@ -90,14 +92,12 @@ class TubulesClassifier(pl.LightningModule):
                                             for img, p, l in green_samples]})
 
     def training_epoch_end(self, training_step_outputs):
-        # self.logger.experiment.log({"train/acc_epoch": self.train_accuracy.compute()})
         wandb.log({"train/acc_epoch": self.train_accuracy.compute()})
         self.train_accuracy.reset()
 
         if self.current_epoch % self.log_confmat_every == 0:
             f = plot_confusion_matrix(self.train_confmat.compute().int().cpu().numpy(),
                                       labels=self.class_names)
-            # self.logger.experiment.log({"train/confusion_matrix": [wandb.Image(fig_to_pil(f))]})
             wandb.log({"train/confusion_matrix": [wandb.Image(fig_to_pil(f))]})
         self.train_confmat.reset()
 
@@ -110,21 +110,18 @@ class TubulesClassifier(pl.LightningModule):
 
         self.val_accuracy(pred, labels)
         self.val_confmat(pred, labels)
-        # self.logger.experiment.log({"val/loss_step": loss})
         if batch_idx % self.log_samples_every == 0:
             self._plot_samples(batch, pred, tag="val")
         wandb.log({"val/loss_step": loss})
         return loss
 
     def validation_epoch_end(self, validation_step_outputs):
-        # self.logger.experiment.log({"val/acc_epoch": self.val_accuracy.compute()})
         wandb.log({"val/acc_epoch": self.val_accuracy.compute()})
         self.val_accuracy.reset()
 
         if self.current_epoch % self.log_confmat_every == 0:
             f = plot_confusion_matrix(self.val_confmat.compute().int().cpu().numpy(),
                                       labels=self.class_names)
-            # self.logger.experiment.log({"val/confusion_matrix": [wandb.Image(fig_to_pil(f))]})
             wandb.log({"val/confusion_matrix": [wandb.Image(fig_to_pil(f))]})
         self.val_confmat.reset()
 
@@ -143,10 +140,6 @@ def main(cfg: DictConfig):
                entity="rauf-kurbanov",
                config=config_dict,
                tags=["debug"])
-    # logger = WandbLogger(project="microtubules",
-    #                      entity="rauf-kurbanov",
-    #                      config=config_dict,
-    #                      tags=["debug"])
     transforms = AUGS_SELECT[cfg.augmentations]()
     dm = TubulesDataModule(data_root=cfg.dataset.data_root,
                            meta_path=cfg.dataset.meta_path,
@@ -161,9 +154,7 @@ def main(cfg: DictConfig):
     model = TubulesClassifier(backbone_name=cfg.backbone_name,
                               class_names=dm.class_names,
                               frozen_encoder=cfg.frozen_encoder)
-    trainer = pl.Trainer(**cfg.trainer,
-                         # logger=logger
-                         )
+    trainer = pl.Trainer(**cfg.trainer)
     trainer.fit(model, datamodule=dm)
 
 

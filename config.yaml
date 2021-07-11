@@ -1,16 +1,16 @@
 seed: 1234
-train_bs: 512
-test_bs: 512
-num_workers: 6
+train_bs: 256
+test_bs: 256
+num_workers: 5
 val_size: 0.2
 balance_classes: True
-frozen_encoder: True
+frozen_encoder: False
 backbone_name: resnet101
 augmentations: no_aug_crop
 
 dataset:
   data_root: /home/rauf/Data/Ola
-  meta_path: /home/rauf/Data/Ola/metadata/dataset.csv
+  meta_path: /home/rauf/Data/Ola/metadata/dataset_filtered.csv
   cmpds:
 #    (1): [ 1.0, 0.3, 6.0, 3.0, 10.0 ]
 #    (2): [ 10.0, 6.0, 1.0, 3.0, 0.3 ]
@@ -46,7 +46,7 @@ dataset:
     "[f]": [ 3.0 ]
 
 trainer:
-  gpus: [2]
+  gpus: [1]
 #  accelerator: dp
   checkpoint_callback: False
 #  limit_train_batches: 3

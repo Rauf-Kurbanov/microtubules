@@ -41,7 +41,7 @@ class TubulesDataModule(pl.LightningDataModule):
         treatment_tuples = [(cmpd, dose) for (cmpd, doses) in cmpds.items() for dose in doses]
         filtered_treatments = pd.MultiIndex.from_tuples(treatment_tuples, names=["cmpd", "second"])
 
-        filtered_meta_df = meta_df[meta_df.index.isin(filtered_treatments)]
+        filtered_meta_df = meta_df[meta_df.index.isin(filtered_treatments) & ~ meta_df.damaged]
         self.meta = filtered_meta_df
 
         self.class_names = sorted(self.meta.treatment_id.unique())
